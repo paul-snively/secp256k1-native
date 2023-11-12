@@ -4,6 +4,7 @@ set -e
 
 dl_macos_jdks () {
   MACOS_JDKS=`mktemp -d`
+  echo "Downloading macOS JDKs to $MACOS_JDKS"
   arches=('x64' 'aarch64')
   for arch in ${arches[@]}; do
     mkdir -p $MACOS_JDKS/$arch
@@ -12,8 +13,14 @@ dl_macos_jdks () {
   printf "%s\n" "${arches[@]}" | xargs -I{} -P2 -- env MACOS_JDKS=$MACOS_JDKS bash -c 'WORK_DIR=`echo $MACOS_JDKS/{}` && pushd $WORK_DIR >/dev/null && tar -xzf OpenJDK11U-jdk_{}_mac_hotspot_11.0.20.1_1.tar.gz && rm OpenJDK11U-jdk_{}_mac_hotspot_11.0.20.1_1.tar.gz && popd >/dev/null'
 }
 
+
+# Assumption: <https://github.com/tpoechtrager/osxcross> has been installed and is on the $PATH
+JNF="$(xcrun --show-sdk-path)/System/Library/Frameworks/JavaNativeFoundation.framework"
+
 cleanup () {
-  echo "Deleting $MACOS_JDKS..."
+  echo "Deleting macOS JDKs at $MACOS_JDKS and cleaning up osxcross..."
+  [ -L "$JNF/Headers" ] && unlink "$JNF/Headers"
+  [ -L "$JNF/include" ] && unlink "$JNF/include"
   rm -fr "$MACOS_JDKS"
 }
 
@@ -34,14 +41,16 @@ cp -r ../jni/java/ src/java/
 cp ../jni/Makefile.am Makefile.am
 cp ../jni/configure.ac configure.ac
 
-# Assumption: <https://github.com/tpoechtrager/osxcross> has been installed and is on the $PATH
-JNF="$(xcrun --show-sdk-path)/System/Library/Frameworks/JavaNativeFoundation.framework"
-unlink $JNF/Headers || true
-ln -s "$MACOS_JDKS/x64/jdk-11.0.20.1+1/Contents/Home/include" "$JNF/Headers"
+echo "Linking AArch64 macOS JDK into osxcross..."
+[ -L "$JNF/Headers" ] && unlink "$JNF/Headers"
+[ -L "$JNF/include" ] && unlink "$JNF/include"
+ln -s "$MACOS_JDKS/aarch64/jdk-11.0.20.1+1/Contents/Home/include" "$JNF/Headers"
+# Ensure `darwin` subdirectory is found under `include`
+ln -s "$MACOS_JDKS/aarch64/jdk-11.0.20.1+1/Contents/Home/include" "$JNF/include"
 
 # Compile secp256k1 native code
 ./autogen.sh
-CC=o64-clang ./configure --host='x86_64-apple-darwin23' --enable-jni --enable-module-ecdh --enable-experimental --enable-module-schnorrsig --enable-module-ecdsa-adaptor
+CC=oa64-clang ./configure --host='aarch64-apple-darwin23' --enable-jni --enable-module-ecdh --enable-experimental --enable-module-schnorrsig --enable-module-ecdsa-adaptor
 # ./configure --enable-jni --enable-module-ecdh
 make CFLAGS="-std=c99"
 make
